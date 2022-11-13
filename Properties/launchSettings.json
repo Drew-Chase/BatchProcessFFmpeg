@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "BatchProcessFFmpeg": {
+      "commandName": "Project",
+      "commandLineArgs": "\"C:\\Users\\drew_\\Downloads\\Season 03\""
+    }
+  }
+}

@@ -1,10 +1,26 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net6.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!--
+    <PublishAot>true</PublishAot>
+    -->
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove=".gitattributes" />
+    <None Remove=".gitignore" />
+    <None Remove="LICENSE.txt" />
+    <None Remove="README.md" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Chase.FFmpeg" Version="0.0.7" />
+    <PackageReference Include="Chase.FFmpeg.Extra" Version="0.0.3" />
+    <PackageReference Include="ChaseLabs.Configuration" Version="0.2.0" />
+  </ItemGroup>
 
 </Project>
