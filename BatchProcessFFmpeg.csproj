@@ -18,8 +18,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Chase.FFmpeg" Version="0.0.7" />
-    <PackageReference Include="Chase.FFmpeg.Extra" Version="0.0.3" />
+    <PackageReference Include="Chase.FFmpeg" Version="0.0.8" />
+    <PackageReference Include="Chase.FFmpeg.Extra" Version="0.0.6" />
   </ItemGroup>
 
 </Project>
