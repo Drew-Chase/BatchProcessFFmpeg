@@ -184,6 +184,10 @@ internal class Program
             {
                 OpenSaveFile();
             }
+            else if (info.Modifiers.HasFlag(ConsoleModifiers.Control) && info.Key == ConsoleKey.O)
+            {
+                OpenWorkspaceDirectory();
+            }
             Thread.Sleep(200);
             InitializeShortcuts();
         });
@@ -228,6 +232,21 @@ internal class Program
                 UseShellExecute = true,
                 CreateNoWindow = false,
 
+            }
+        };
+
+        p.Start();
+    }
+
+    private void OpenWorkspaceDirectory()
+    {
+        Process p = new()
+        {
+            StartInfo = new()
+            {
+                FileName = workspace_dir,
+                UseShellExecute = true,
+                CreateNoWindow = false,
             }
         };
 

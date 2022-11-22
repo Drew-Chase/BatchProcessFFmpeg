@@ -16,6 +16,7 @@
 ./bpf.exe "/path/to/files/even with a space/"
 ```
 # Shortcuts
+1. **`Ctrl` + `O`** - *Open workspace directory*
 1. **`Ctrl` + `S`** - *Open settings file*
 1. **`Ctrl` + `P`** - *Safely stops the program. The current process will finish and then the program will exit!*  
 
