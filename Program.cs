@@ -7,6 +7,7 @@ using CLMath;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Text;
 using Timer = System.Timers.Timer;
 
@@ -25,9 +26,12 @@ internal class Program
     private readonly Dictionary<string, string> output = new();
     private readonly string settings_file;
     private readonly List<double> speeds = new();
+    private readonly List<double> reductions = new();
+    private readonly List<double> durations = new();
     private readonly long start;
     private readonly string tmp_dir;
     private readonly int total_files = 0;
+    private TimeSpan runtime;
 
     private readonly Timer update_screen_timer = new(500)
     {
@@ -40,7 +44,8 @@ internal class Program
     private string audio_bitrate = "";
     private string audio_codec = "aac";
     private int concurrent = 3;
-    private int current_index;
+    private int current_offset = 0;
+    private int current_index = 0;
     private string current_status = "";
     private long est_time = 0;
     private bool overwrite = true;
@@ -51,11 +56,10 @@ internal class Program
     private string video_bitrate = "";
     private string video_codec = "h264";
     bool stopping = false;
+    private readonly long total_size = 0;
 
     private Program(string[] args)
     {
-        InitializeShortcuts();
-
         string exe_dir = Environment.CurrentDirectory;
         if (args.Any())
         {
@@ -70,7 +74,7 @@ internal class Program
 
         workspace_dir = Directory.CreateDirectory(Path.Combine(exe_dir, Environment.CurrentDirectory.Replace(Path.DirectorySeparatorChar, '_').Replace(":", ""))).FullName;
         settings_file = Path.Combine(workspace_dir, $"settings.json");
-        current_index = processed?.Count ?? 0;
+        current_offset = processed?.Count ?? 0;
         tmp_dir = Directory.CreateDirectory(Path.Combine(workspace_dir, "tmp")).FullName;
         if (Directory.Exists(tmp_dir))
             Directory.Delete(tmp_dir, true);
@@ -93,7 +97,7 @@ internal class Program
         Console.ResetColor();
         try
         {
-            files = FFVideoUtility.GetFiles(Environment.CurrentDirectory, true).ToList();
+            files = FFVideoUtility.GetFiles(Environment.CurrentDirectory, true).OrderBy(i=>new FileInfo(i).Length).Reverse().ToList();
         }
         catch (Exception e)
         {
@@ -113,12 +117,20 @@ internal class Program
         }
         else
         {
-            current_status = "Removing redundant items...";
             total_files = files.Count;
-            files = files.Where(i => !processed.Any(l => l.file.Equals(i))).OrderBy(i => new FileInfo(i).Length).Reverse().ToList();
+
             if (processed.Any())
             {
-                speeds.AddRange(Array.ConvertAll(processed.ToArray(), i => i.average_speed));
+                current_status = "Parsing Stats...";
+
+                foreach (var process in processed)
+                {
+                    files.Remove(process.file);
+                    speeds.Add(process.average_speed);
+                    reductions.Add(process.new_size / process.original_size);
+                    durations.Add(process.video_duration.TotalSeconds);
+                }
+
             }
             offset = total_files - files.Count;
             AppDomain.CurrentDomain.ProcessExit += (s, e) => Exit();
@@ -128,6 +140,15 @@ internal class Program
             {
                 est_time = (long)processed.Average(i => i.time) * files.Count;
             }
+
+
+            current_status = "Getting total size...";
+
+            foreach (string file in files)
+            {
+                total_size += new FileInfo(file).Length;
+            }
+
             current_status = "";
             ProcessQueue();
         }
@@ -173,24 +194,24 @@ internal class Program
         return time_builder.ToString();
     }
 
-    private Task InitializeShortcuts() => Task.Run(() =>
+    private void InitializeShortcuts()
+    {
+        ConsoleKeyInfo info = Console.ReadKey(true);
+        if (info.Modifiers.HasFlag(ConsoleModifiers.Control) && info.Key == ConsoleKey.P)
         {
-            ConsoleKeyInfo info = Console.ReadKey(true);
-            if (info.Modifiers.HasFlag(ConsoleModifiers.Control) && info.Key == ConsoleKey.P)
-            {
-                Pause();
-            }
-            else if (info.Modifiers.HasFlag(ConsoleModifiers.Control) && info.Key == ConsoleKey.S)
-            {
-                OpenSaveFile();
-            }
-            else if (info.Modifiers.HasFlag(ConsoleModifiers.Control) && info.Key == ConsoleKey.O)
-            {
-                OpenWorkspaceDirectory();
-            }
-            Thread.Sleep(200);
+            Pause();
+        }
+        else if (info.Modifiers.HasFlag(ConsoleModifiers.Control) && info.Key == ConsoleKey.S)
+        {
+            OpenSaveFile();
+        }
+        else if (info.Modifiers.HasFlag(ConsoleModifiers.Control) && info.Key == ConsoleKey.O)
+        {
+            OpenWorkspaceDirectory();
+        }
+        if (!stopping || !paused)
             InitializeShortcuts();
-        });
+    }
 
     private void KillCurrent()
     {
@@ -266,10 +287,13 @@ internal class Program
         }
     }
 
-    private void ProcessFile(string file)
+    private Task ProcessFile(string file) => Task.Run(() =>
     {
         try
         {
+            current_index++;
+            Process process = null;
+            active_processes.Add(process);
             List<double> recorded_speeds = new();
             long st = DateTime.Now.Ticks;
             FileInfo fileInfo = new(file);
@@ -295,8 +319,6 @@ internal class Program
 
             string tmp = Path.Combine(tmp_dir, $"{info.Filename}_tmp{fileInfo.Extension}");
             StringBuilder ffoutput = new();
-            Process process = null;
-            active_processes.Add(process);
             bool killed = false;
             process = converter.Convert(tmp, (s, e) =>
             {
@@ -311,7 +333,7 @@ internal class Program
                     if ((ulong)newFile.Length >= info.Size)
                     {
                         killed = true;
-                        process?.Kill();
+                        process.Kill();
                         string msg = $"Converted file is larger: {info.Filename}";
                         error_files.Add(msg);
                         Timer et = new(1000 * 20)
@@ -330,7 +352,7 @@ internal class Program
                             {
                             }
                         };
-                        processed.Add(new(file, DateTime.Now.Ticks - st, (long)info.Size, (long)info.Size, TimeSpan.FromSeconds(info.Duration), recorded_speeds.Average(), false));
+                        processed.Add(new(file, DateTime.Now.Ticks - st, (long)info.Size, (long)info.Size, info.Duration, recorded_speeds.Average(), false));
                         Save();
                         et.Start();
                     }
@@ -341,16 +363,16 @@ internal class Program
                 {
                     if (!id.ContainsKey(file))
                     {
-                        current_index++;
-                        id.Add(file, current_index);
+                        current_offset++;
+                        id.Add(file, current_offset);
                     }
 
                     StringBuilder o = new();
-                    o.Append($"[{new string(info.Filename.Take(18).ToArray()).Trim()}... ({id[file] + offset}/{(total_files)})] {(e.Percentage / 100):p2} | ");
+                    o.Append($"[{new string(info.Filename.Take(18).ToArray()).Trim()}... ({id[file] + offset}/{(total_files)})] {e.Percentage:p2} | ");
                     double size = 50d;
                     for (int i = 0; i < size; i++)
                     {
-                        if (e.Percentage >= i * (100 / size))
+                        if (e.Percentage * 100 >= i * (100 / size))
                         {
                             o.Append('=');
                         }
@@ -361,7 +383,7 @@ internal class Program
                     }
                     recorded_speeds.Add(e.Speed);
                     speeds.Add(e.Speed);
-                    o.Append($" | {e.Speed:n2}x Speed | {info.SizeENG}");
+                    o.Append($" | {e.Speed:n2}x Speed | {CLFileMath.AdjustedFileSize(new FileInfo(tmp).Length)} / {CLFileMath.AdjustedFileSize(info.Size)}");
                     if (!output.ContainsKey(file))
                     {
                         output.Add(file, o.ToString());
@@ -372,8 +394,13 @@ internal class Program
                     }
                 }
                 catch { }
-            });
+            }, false);
 
+            process.Start();
+            process.BeginErrorReadLine();
+            process.BeginOutputReadLine();
+            process.WaitForExit();
+            process.Close();
             if (output.Any() && output.ContainsKey(file))
                 output.Remove(file);
             if (id.Any() && id.ContainsKey(file))
@@ -390,16 +417,19 @@ internal class Program
                         saved_bytes += file_saved;
                         if (overwrite)
                         {
-                            Task.Run(() =>
-                            {
-                                moving_files.Add(file);
-                                File.Move(tmp, file, true);
-                                moving_files.Remove(file);
-                            });
+                            Task move_task = Task.Run(() =>
+                               {
+                                   moving_files.Add(file);
+                                   File.Move(tmp, file, true);
+                                   moving_files.Remove(file);
+                               });
+                            if (paused)
+                                move_task.Wait();
                         }
                     }
-                    processed.Add(new(file, DateTime.Now.Ticks - st, (long)info.Size, new_size, TimeSpan.FromSeconds(info.Duration), recorded_speeds.Average(), true));
+                    processed.Add(new(file, DateTime.Now.Ticks - st, (long)info.Size, new_size, info.Duration, recorded_speeds.Average(), true));
                     est_time = (long)processed.Average(i => i.time) * files.Count;
+                    reductions.Add(new_size / fileInfo.Length);
                     Save();
                 }
                 else
@@ -435,16 +465,23 @@ internal class Program
             using StreamWriter writer = new(fs);
             writer.Write(JsonConvert.SerializeObject(e, Formatting.Indented));
         }
-    }
+    }).ContinueWith(a =>
+    {
+        if (!paused && !stopping && current_index < files.Count)
+        {
+            ProcessFile(files[current_index + 1]);
+        }
+        else
+            Exit();
+    });
 
     private void ProcessQueue()
     {
-        Parallel.For(0, files.Count, new() { MaxDegreeOfParallelism = concurrent }, i =>
+        for (int i = 0; i < concurrent; i++)
         {
-            if (paused)
-                return;
             ProcessFile(files[i]);
-        });
+        }
+        InitializeShortcuts();
     }
 
     private void Save()
@@ -487,38 +524,74 @@ internal class Program
         Console.CursorLeft = 0;
         Console.ForegroundColor = ConsoleColor.Yellow;
         Console.WriteLine(builder);
-        Console.CursorTop = concurrent + 2;
+        Console.CursorTop = active_processes.Count + 2;
         Console.CursorLeft = 0;
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"Saved {CLFileMath.AdjustedFileSize(saved_bytes)}!");
-        Console.ForegroundColor = ConsoleColor.Cyan;
-        TimeSpan runtime = new(DateTime.Now.Ticks - start);
 
+        Console.ForegroundColor = ConsoleColor.Cyan;
+        runtime = new(DateTime.Now.Ticks - start);
         Console.WriteLine($"Runtime: {GetTime(runtime)}");
 
-        if (processed.Any() && est_time != 0)
-        {
-            TimeSpan est_span = new(est_time - runtime.Ticks);
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"EST Time: {GetTime(est_span)}");
-        }
+        WriteStats();
+        WriteEstamates();
 
-        Console.ForegroundColor = ConsoleColor.Yellow;
+        WriteMessages();
+
+        Console.ResetColor();
+
+        if (!stopping)
+            update_screen_timer.Start();
+    }
+
+    private void WriteMessages()
+    {
+        Console.ForegroundColor = ConsoleColor.Blue;
+        Console.WriteLine(current_status);
+
         foreach (string file in moving_files)
         {
             Console.WriteLine($"Overwriting {new FileInfo(file).Name}!");
         }
+
         Console.ForegroundColor = ConsoleColor.Red;
         foreach (string file in error_files)
         {
             Console.WriteLine($"Failed to Process {new FileInfo(file).Name}!");
         }
-
-        Console.ForegroundColor = ConsoleColor.Blue;
-        Console.WriteLine(current_status);
-
         Console.ResetColor();
-        if (!stopping)
-            update_screen_timer.Start();
+    }
+
+    void WriteStats()
+    {
+        if (saved_bytes > 0 && total_size > 0)
+        {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("Statistics:");
+            if (saved_bytes > 0)
+                Console.WriteLine($"\t-Saved {CLFileMath.AdjustedFileSize(saved_bytes)}!");
+            if (total_size > 0)
+                Console.WriteLine($"\t-Total {CLFileMath.AdjustedFileSize(total_size)}!");
+        }
+        Console.ResetColor();
+    }
+
+    void WriteEstamates()
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        if (processed.Any() && est_time != 0)
+        {
+            Console.WriteLine($"Estamates: ");
+
+            double average_speed = speeds.Average();
+            double average_duration = durations.Average();
+
+            double duration_seconds = (average_duration / average_speed * total_files) - runtime.TotalSeconds;
+            double size_seconds = new TimeSpan(est_time - runtime.Ticks).TotalSeconds;
+
+            Console.WriteLine($"\t-EST Time (size): {GetTime(TimeSpan.FromSeconds(size_seconds))}");
+            Console.WriteLine($"\t-EST Time (duration): {GetTime(TimeSpan.FromSeconds(duration_seconds))}");
+            Console.WriteLine($"\t-EST Time (average): {GetTime(TimeSpan.FromSeconds((duration_seconds + size_seconds) / 2))}");
+            Console.WriteLine($"\t-EST Savings: {CLFileMath.AdjustedFileSize(reductions.Average() * total_size)}");
+        }
+        Console.ResetColor();
     }
 }
