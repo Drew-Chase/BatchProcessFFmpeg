@@ -48,18 +48,18 @@ internal class Program : IDisposable
     private string audio_bitrate = "";
     private string audio_codec = "aac";
     private int concurrent = 3;
-    private int current_index = 0;
-    private int current_offset = 0;
-    private List<string> current_status = new();
-    private long est_time = 0;
+    private int current_index;
+    private int current_offset;
+    private List<string> current_status = [];
+    private long est_time;
     private TimeSpan export_creation;
-    private List<string> files = new();
-    private bool needs_reeval = false;
-    private int offset = 0;
+    private List<string> files = [];
+    private bool needs_reeval;
+    private int offset;
     private bool overwrite = true;
-    private bool paused = false;
+    private bool paused;
     private string pixel_format = "yuv420p";
-    private List<ProcessedFile> processed = new();
+    private List<ProcessedFile> processed = [];
     private TimeSpan runtime;
     private long saved_bytes = 0;
     private bool stopping = false;
@@ -67,7 +67,7 @@ internal class Program : IDisposable
     private long total_size = 0;
     private string video_bitrate = "";
     private string video_codec = "h264";
-    private FileSystemWatcher? watcher = null;
+    private FileSystemWatcher? watcher;
 
     private Program(string[] args)
     {
@@ -493,7 +493,7 @@ internal class Program : IDisposable
         try
         {
             current_index++;
-            Process process = null;
+            Process? process = null;
             active_processes.Add(process);
             List<double> recorded_speeds = new();
             long st = DateTime.Now.Ticks;
@@ -723,6 +723,14 @@ internal class Program : IDisposable
                 }
             }
             process?.Close();
+            if (File.Exists(file))
+            {
+                File.Delete(file);
+            }
+            if (File.Exists(tmp))
+            {
+                File.Delete(tmp);
+            }
         }
         catch (Exception e)
         {
