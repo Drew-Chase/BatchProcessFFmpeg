@@ -1,5 +1,5 @@
 ﻿// LFInteractive LLC. 2021-2024
-﻿
+
 
 using System.Text;
 
@@ -111,8 +111,8 @@ internal class ConsoleHandler
             UpdateStats();
         UpdateMessage();
 
-        await Task.Delay(1000);
-        await Update();
+        await Task.Delay(1000).ConfigureAwait(true);
+        await Update().ConfigureAwait(true);
     }
 
     private void UpdateMessage()
