@@ -15,7 +15,7 @@ namespace BatchProcessFFmpeg;
 
 //record ProcessedFile(string file, long time, long original_size, long new_size, TimeSpan video_duration, double average_speed, bool successful);
 
-internal class Program : IDisposable
+internal class Program
 {
     private readonly List<Process> active_processes = [];
     private readonly List<double> durations = [];
@@ -45,21 +45,22 @@ internal class Program : IDisposable
     };
 
     private readonly string workspace_dir;
+    private readonly string[] processing_dirs;
     private string audio_bitrate = "";
     private string audio_codec = "aac";
     private int concurrent = 3;
-    private int current_index;
-    private int current_offset;
-    private List<string> current_status = [];
-    private long est_time;
+    private int current_index = 0;
+    private int current_offset = 0;
+    private List<string> current_status = new();
+    private long est_time = 0;
     private TimeSpan export_creation;
-    private List<string> files = [];
-    private bool needs_reeval;
-    private int offset;
+    private List<string> files = new();
+    private bool needs_reeval = false;
+    private int offset = 0;
     private bool overwrite = true;
-    private bool paused;
+    private bool paused = false;
     private string pixel_format = "yuv420p";
-    private List<ProcessedFile> processed = [];
+    private List<ProcessedFile> processed = new();
     private TimeSpan runtime;
     private long saved_bytes = 0;
     private bool stopping = false;
@@ -67,17 +68,32 @@ internal class Program : IDisposable
     private long total_size = 0;
     private string video_bitrate = "";
     private string video_codec = "h264";
-    private FileSystemWatcher? watcher;
+    private FileSystemWatcher[] watchers;
 
     private Program(string[] args)
     {
-        string exe_dir = Environment.CurrentDirectory;
         if (args.Any())
         {
-            Environment.CurrentDirectory = Path.GetFullPath(args[0]);
+            processing_dirs = new string[args.Length - 1];
+            for (int i = 1; i < args.Length; i++)
+            {
+                if (Directory.Exists(args[i]))
+                {
+                    processing_dirs[i] = args[i];
+                }
+                else
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.Error.WriteLine($"Argument is not a directory: \"{args[i]}\"");
+                    Console.ResetColor();
+                    Environment.Exit(1);
+                    return;
+                }
+            }
         }
 
-        exe_dir = Directory.CreateDirectory(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "LFInteractive", "Batch Process FFmpeg")).FullName;
+        string exe_dir = Directory.GetParent(System.Reflection.Assembly.GetExecutingAssembly()?.Location ?? "")?.FullName ?? "";
+
         start = DateTime.Now.Ticks;
 
         UpdateScreen();
@@ -122,16 +138,14 @@ internal class Program : IDisposable
 
     public void Dispose()
     {
-        watcher?.Dispose();
+        Exit();
     }
 
     private static string CleanFilename(string filename)
     {
         StringBuilder builder = new();
         builder.Append(filename);
-        List<char> chars = new();
-        chars.AddRange(Path.GetInvalidFileNameChars());
-        chars.AddRange(Path.GetInvalidPathChars());
+        List<char> chars = [.. Path.GetInvalidFileNameChars(), .. Path.GetInvalidPathChars()];
         foreach (char c in chars)
         {
             builder = builder.Replace(c, '_');
@@ -252,7 +266,10 @@ internal class Program : IDisposable
 
         try
         {
-            watcher?.Dispose();
+            foreach (FileSystemWatcher watcher in watchers)
+            {
+                watcher?.Dispose();
+            }
             KillCurrent();
             if (Directory.Exists(tmp_dir))
                 Directory.Delete(tmp_dir, true);
@@ -294,14 +311,17 @@ internal class Program : IDisposable
 
     private void GetFiles()
     {
-        files = Import().ToList();
+        files = [.. Import()];
         if (!files.Any())
         {
             current_status.Add("Scanning for Files...");
             try
             {
                 total_size = 0;
-                files = FFVideoUtility.GetFiles(Environment.CurrentDirectory, true).ToList();
+                foreach (string dir in processing_dirs)
+                {
+                    files.AddRange(FFVideoUtility.GetFiles(dir, true));
+                }
                 needs_reeval = true;
             }
             catch (Exception e)
@@ -310,7 +330,7 @@ internal class Program : IDisposable
                 Console.ForegroundColor = ConsoleColor.Red;
                 Console.WriteLine($"Error while scanning for files... Trying again!");
                 Console.ResetColor();
-                _ = new Program(new string[] { Environment.CurrentDirectory });
+                _ = new Program([Environment.CurrentDirectory]);
                 return;
             }
         }
@@ -493,7 +513,7 @@ internal class Program : IDisposable
         try
         {
             current_index++;
-            Process? process = null;
+            Process process = null;
             active_processes.Add(process);
             List<double> recorded_speeds = new();
             long st = DateTime.Now.Ticks;
@@ -502,7 +522,7 @@ internal class Program : IDisposable
 
             string og_file = file;
             output.Add(og_file, "");
-            file = Copy(file, Path.Combine(tmp_dir, $"og_{fileInfo.Name}"));
+            //file = Copy(file, Path.Combine(tmp_dir, $"og_{fileInfo.Name}"));
 
             FFMediaInfo info = new(file);
             FFMuxedConverter converter = FFMuxedConverter.SetMedia(info);
@@ -523,7 +543,7 @@ internal class Program : IDisposable
                 converter.ChangePixelFormat(pixel_format);
 
             converter.OverwriteOriginal();
-            converter.AddCustomPostInputOption("-map 0:v:0 -map 0:a");
+            converter.AddCustomPostInputOption("-map 0");
 
             string tmp = Path.Combine(tmp_dir, $"{info.Filename}_tmp{fileInfo.Extension}");
             StringBuilder ffoutput = new();
@@ -672,6 +692,10 @@ internal class Program : IDisposable
                                         Thread.Sleep(1000 * 5);
                                         move_task?.Start();
                                     }
+                                    if (File.Exists(file))
+                                        File.Delete(file);
+                                    if (File.Exists(tmp))
+                                        File.Delete(tmp);
                                 });
                                 move_task.Start();
 
@@ -723,14 +747,6 @@ internal class Program : IDisposable
                 }
             }
             process?.Close();
-            if (File.Exists(file))
-            {
-                File.Delete(file);
-            }
-            if (File.Exists(tmp))
-            {
-                File.Delete(tmp);
-            }
         }
         catch (Exception e)
         {
@@ -847,14 +863,20 @@ internal class Program : IDisposable
 
     private Task Watch() => Task.Run(() =>
     {
-        watcher = new()
+        watchers = new FileSystemWatcher[processing_dirs.Length - 1];
+        for (int i = 0; i < processing_dirs.Length; i++)
         {
-            Path = Environment.CurrentDirectory,
-            NotifyFilter = NotifyFilters.CreationTime | NotifyFilters.DirectoryName | NotifyFilters.FileName,
-            Filter = "*.*",
-            IncludeSubdirectories = true,
-            EnableRaisingEvents = true,
-        };
+            watchers[i] = new()
+            {
+                Path = processing_dirs[i],
+                NotifyFilter = NotifyFilters.CreationTime | NotifyFilters.DirectoryName | NotifyFilters.FileName,
+                Filter = "*.*",
+                IncludeSubdirectories = true,
+                EnableRaisingEvents = true,
+            };
+            watchers[i].Created += handler;
+            watchers[i].Deleted += handler;
+        }
         void handler(object s, FileSystemEventArgs e)
         {
             try
@@ -881,8 +903,6 @@ internal class Program : IDisposable
                 Error(ex);
             }
         }
-        watcher.Created += handler;
-        watcher.Deleted += handler;
     });
 
     private void WriteEstamates()
