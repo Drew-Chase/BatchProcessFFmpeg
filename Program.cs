@@ -693,15 +693,16 @@ internal class Program
                                         Thread.Sleep(1000 * 5);
                                         move_task?.Start();
                                     }
-                                    if (File.Exists(file))
-                                        File.Delete(file);
-                                    if (File.Exists(tmp))
-                                        File.Delete(tmp);
                                 });
-                                move_task.Start();
-
-                                if (paused || stopping || current_index >= files.Count)
-                                    move_task.Wait();
+                                try
+                                {
+                                    move_task.Start();
+                                    if (paused || stopping || current_index >= files.Count)
+                                        move_task.Wait();
+                                }
+                                catch
+                                {
+                                }
                             }
                             catch (Exception e)
                             {
@@ -722,6 +723,11 @@ internal class Program
                     est_time = (long)processed.Average(i => i.time) * files.Count;
                     reductions.Add(new_size / fileInfo.Length);
                     Save();
+
+                    if (File.Exists(file))
+                        File.Delete(file);
+                    if (File.Exists(tmp))
+                        File.Delete(tmp);
                 }
                 else
                 {
