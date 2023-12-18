@@ -74,8 +74,8 @@ internal class Program
     {
         if (args.Any())
         {
-            processing_dirs = new string[args.Length - 1];
-            for (int i = 1; i < args.Length; i++)
+            processing_dirs = new string[args.Length];
+            for (int i = 0; i < args.Length; i++)
             {
                 if (Directory.Exists(args[i]))
                 {
@@ -99,7 +99,7 @@ internal class Program
         UpdateScreen();
         update_screen_timer.Elapsed += (s, e) => UpdateScreen();
 
-        workspace_dir = Directory.CreateDirectory(Path.Combine(exe_dir, Environment.CurrentDirectory.Replace(Path.DirectorySeparatorChar, '_').Replace(":", ""))).FullName;
+        workspace_dir = Directory.CreateDirectory(Path.Combine(exe_dir, string.Join("--", processing_dirs).Replace(Path.DirectorySeparatorChar, '_').Replace(":", ""))).FullName;
         settings_file = Path.Combine(workspace_dir, $"settings.json");
         export_file = Path.Combine(workspace_dir, "export.json");
         current_offset = processed?.Count ?? 0;
@@ -544,6 +544,7 @@ internal class Program
 
             converter.OverwriteOriginal();
             converter.AddCustomPostInputOption("-map 0");
+            converter.AddCustomPostInputOption("-c:s copy");
 
             string tmp = Path.Combine(tmp_dir, $"{info.Filename}_tmp{fileInfo.Extension}");
             StringBuilder ffoutput = new();
@@ -863,7 +864,7 @@ internal class Program
 
     private Task Watch() => Task.Run(() =>
     {
-        watchers = new FileSystemWatcher[processing_dirs.Length - 1];
+        watchers = new FileSystemWatcher[processing_dirs.Length];
         for (int i = 0; i < processing_dirs.Length; i++)
         {
             watchers[i] = new()
