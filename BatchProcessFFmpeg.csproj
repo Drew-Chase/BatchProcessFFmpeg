@@ -8,6 +8,7 @@
     <GenerateDocumentationFile>True</GenerateDocumentationFile>
     <IncludeSymbols>False</IncludeSymbols>
     <AnalysisLevel>6.0-all</AnalysisLevel>
+    <NeutralLanguage>en</NeutralLanguage>
     <!--
     <PublishAot>true</PublishAot>
     -->
