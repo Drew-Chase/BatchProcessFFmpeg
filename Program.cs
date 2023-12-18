@@ -798,10 +798,13 @@ internal class Program
             Console.CursorLeft = 0;
             Console.ForegroundColor = ConsoleColor.Green;
             int path_length = 20;
-            Console.Write("PROCESSING: ");
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            string dir_name = new DirectoryInfo(Environment.CurrentDirectory).Name;
-            Console.WriteLine(Environment.CurrentDirectory.Length >= path_length + dir_name.Length + 4 ? new string(Environment.CurrentDirectory.Take(path_length).ToArray()) + @"...\" + dir_name + @"\" : Environment.CurrentDirectory);
+            Console.WriteLine("PROCESSING: ");
+            foreach (string dir in processing_dirs)
+            {
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                string dir_name = new DirectoryInfo(dir).Name;
+                Console.WriteLine("- " + (dir.Length >= path_length + dir_name.Length + 4 ? new string(dir.Take(path_length).ToArray()) + @"...\" + dir_name + @"\" : dir));
+            }
             StringBuilder builder = new();
 
             foreach (var o in output)
@@ -809,11 +812,11 @@ internal class Program
                 builder.AppendLine(o.Value.StartsWith("[og_") ? "[" + o.Value[4..] : o.Value);
             }
 
-            Console.CursorTop = 1;
+            Console.CursorTop = processing_dirs.Length + 2;
             Console.CursorLeft = 0;
             Console.ForegroundColor = ConsoleColor.Yellow;
             Console.WriteLine(builder);
-            Console.CursorTop = concurrent + 2;
+            Console.CursorTop = concurrent + 5;
             Console.CursorLeft = 0;
 
             Console.ForegroundColor = ConsoleColor.Cyan;
