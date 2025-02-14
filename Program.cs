@@ -1,5 +1,9 @@
 ﻿// LFInteractive LLC. 2021-2024
-﻿using BatchProcessFFmpeg.Models;
+
+using System.Diagnostics;
+using System.Reflection;
+using System.Text;
+using BatchProcessFFmpeg.Models;
 using Chase.FFmpeg.Converters;
 using Chase.FFmpeg.Downloader;
 using Chase.FFmpeg.Extra;
@@ -7,8 +11,6 @@ using Chase.FFmpeg.Info;
 using CLMath;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using System.Diagnostics;
-using System.Text;
 using Timer = System.Timers.Timer;
 
 namespace BatchProcessFFmpeg;
@@ -25,13 +27,14 @@ internal class Program
     private readonly Timer export_timer = new(TimeSpan.FromSeconds(20).TotalMilliseconds)
     {
         AutoReset = false,
-        Enabled = true,
+        Enabled = true
     };
 
     private readonly Dictionary<string, int> id = [];
     private readonly List<string> moving_files = [];
     private readonly Dictionary<string, string> output = [];
     private readonly List<long> process_times = [];
+    private readonly string[] processing_dirs;
     private readonly List<double> reductions = [];
     private readonly string settings_file;
     private readonly List<double> speeds = [];
@@ -41,31 +44,30 @@ internal class Program
     private readonly Timer update_screen_timer = new(500)
     {
         AutoReset = false,
-        Enabled = true,
+        Enabled = true
     };
 
     private readonly string workspace_dir;
-    private readonly string[] processing_dirs;
     private string audio_bitrate = "";
     private string audio_codec = "aac";
     private int concurrent = 3;
-    private int current_index = 0;
-    private int current_offset = 0;
-    private List<string> current_status = new();
-    private long est_time = 0;
+    private int current_index;
+    private int current_offset;
+    private readonly List<string> current_status = new();
+    private long est_time;
     private TimeSpan export_creation;
     private List<string> files = new();
-    private bool needs_reeval = false;
-    private int offset = 0;
+    private bool needs_reeval;
+    private int offset;
     private bool overwrite = true;
-    private bool paused = false;
+    private bool paused;
     private string pixel_format = "yuv420p";
     private List<ProcessedFile> processed = new();
     private TimeSpan runtime;
-    private long saved_bytes = 0;
-    private bool stopping = false;
-    private int total_files = 0;
-    private long total_size = 0;
+    private long saved_bytes;
+    private bool stopping;
+    private int total_files;
+    private long total_size;
     private string video_bitrate = "";
     private string video_codec = "h264";
     private FileSystemWatcher[] watchers;
@@ -75,8 +77,7 @@ internal class Program
         if (args.Any())
         {
             processing_dirs = new string[args.Length];
-            for (int i = 0; i < args.Length; i++)
-            {
+            for (var i = 0; i < args.Length; i++)
                 if (Directory.Exists(args[i]))
                 {
                     processing_dirs[i] = args[i];
@@ -89,10 +90,9 @@ internal class Program
                     Environment.Exit(1);
                     return;
                 }
-            }
         }
 
-        string exe_dir = Directory.GetParent(System.Reflection.Assembly.GetExecutingAssembly()?.Location ?? "")?.FullName ?? "";
+        var exe_dir = Directory.GetParent(Assembly.GetExecutingAssembly()?.Location ?? "")?.FullName ?? "";
 
         start = DateTime.Now.Ticks;
 
@@ -100,7 +100,7 @@ internal class Program
         update_screen_timer.Elapsed += (s, e) => UpdateScreen();
 
         workspace_dir = Directory.CreateDirectory(Path.Combine(exe_dir, string.Join("--", processing_dirs).Replace(Path.DirectorySeparatorChar, '_').Replace(":", ""))).FullName;
-        settings_file = Path.Combine(workspace_dir, $"settings.json");
+        settings_file = Path.Combine(workspace_dir, "settings.json");
         export_file = Path.Combine(workspace_dir, "export.json");
         current_offset = processed?.Count ?? 0;
         tmp_dir = Directory.CreateDirectory(Path.Combine(workspace_dir, "tmp")).FullName;
@@ -124,10 +124,7 @@ internal class Program
         FFmpegDownloader.Instance.GetLatest(Path.Combine(exe_dir, "ffmpeg")).Wait();
         current_status.Remove("Checking FFmpeg...");
         Console.ResetColor();
-        Task.Run(() =>
-        {
-            InitializeShortcuts();
-        });
+        Task.Run(() => { InitializeShortcuts(); });
         GetFiles();
         if (files.Any())
         {
@@ -146,32 +143,17 @@ internal class Program
         StringBuilder builder = new();
         builder.Append(filename);
         List<char> chars = [.. Path.GetInvalidFileNameChars(), .. Path.GetInvalidPathChars()];
-        foreach (char c in chars)
-        {
-            builder = builder.Replace(c, '_');
-        }
+        foreach (var c in chars) builder = builder.Replace(c, '_');
         return builder.ToString();
     }
 
     private static string GetTime(TimeSpan span)
     {
         StringBuilder time_builder = new();
-        if (span.Days > 0)
-        {
-            time_builder.Append($"{span.Days} days ");
-        }
-        if (span.Hours > 0)
-        {
-            time_builder.Append($"{span.Hours} hours ");
-        }
-        if (span.Minutes > 0)
-        {
-            time_builder.Append($"{span.Minutes} minutes ");
-        }
-        if (span.Seconds > 0)
-        {
-            time_builder.Append($"{span.Seconds} seconds");
-        }
+        if (span.Days > 0) time_builder.Append($"{span.Days} days ");
+        if (span.Hours > 0) time_builder.Append($"{span.Hours} hours ");
+        if (span.Minutes > 0) time_builder.Append($"{span.Minutes} minutes ");
+        if (span.Seconds > 0) time_builder.Append($"{span.Seconds} seconds");
         return time_builder.ToString();
     }
 
@@ -184,18 +166,18 @@ internal class Program
     {
         FileInfo fileInfo = new(from);
         current_status.Add($"Copying {fileInfo.Name}");
-        long length = fileInfo.Length;
-        byte[] buffer = new byte[1024 * 1024];
+        var length = fileInfo.Length;
+        var buffer = new byte[1024 * 1024];
         using (FileStream dest = new(to, FileMode.Create, FileAccess.Write, FileShare.None))
         {
             using FileStream source = new(from, FileMode.Open, FileAccess.Read, FileShare.None);
             long totalBytes = 0;
-            int currentBlockSize = 0;
+            var currentBlockSize = 0;
 
             while ((currentBlockSize = source.Read(buffer, 0, buffer.Length)) > 0)
             {
                 totalBytes += currentBlockSize;
-                double percentage = (double)totalBytes / length;
+                var percentage = (double)totalBytes / length;
                 dest.Write(buffer, 0, currentBlockSize);
                 //current_status.Remove(current_status.First(i => i.StartsWith($"Copying {fileInfo.Name}")));
                 //current_status.Add($"Copying {fileInfo.Name} {percentage:P2}");
@@ -204,27 +186,18 @@ internal class Program
                 try
                 {
                     StringBuilder o = new();
-                    string name = fileInfo.Name;
-                    int l = (int)(Console.WindowWidth * .35);
-                    if (name.Length > l + 4)
-                    {
-                        name = $"{new string(fileInfo.Name.Take(l / 2).ToArray()).Trim()}...{new string(fileInfo.Name.TakeLast(l / 2).ToArray()).Trim()}";
-                    }
-                    string bf = $"[{name}] {percentage:p2} | ";
-                    int content_size = bf.Length;
+                    var name = fileInfo.Name;
+                    var l = (int)(Console.WindowWidth * .35);
+                    if (name.Length > l + 4) name = $"{new string(fileInfo.Name.Take(l / 2).ToArray()).Trim()}...{new string(fileInfo.Name.TakeLast(l / 2).ToArray()).Trim()}";
+                    var bf = $"[{name}] {percentage:p2} | ";
+                    var content_size = bf.Length;
                     o.Append(bf);
                     double size = Console.WindowWidth - content_size - 10;
-                    for (int i = 0; i < size; i++)
-                    {
+                    for (var i = 0; i < size; i++)
                         if (percentage * 100 >= i * (100 / size))
-                        {
                             o.Append('=');
-                        }
                         else
-                        {
                             o.Append(' ');
-                        }
-                    }
                     output[from] = o.ToString();
                 }
                 catch
@@ -242,7 +215,7 @@ internal class Program
     private void Error(string message, string name = "error")
     {
         name = CleanFilename(name);
-        string error_dir = Directory.CreateDirectory(Path.Combine(workspace_dir, "error")).FullName;
+        var error_dir = Directory.CreateDirectory(Path.Combine(workspace_dir, "error")).FullName;
         using FileStream fs = new(Path.Combine(error_dir, $"{name}_{DateTime.Now.Ticks}.json"), FileMode.Create, FileAccess.Write, FileShare.None);
         using StreamWriter writer = new(fs);
         writer.Write(message);
@@ -258,18 +231,12 @@ internal class Program
         stopping = true;
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine("Exiting!!!!");
-        if (attempts > 0)
-        {
-            Console.WriteLine($"Attempt: {attempts + 1}");
-        }
+        if (attempts > 0) Console.WriteLine($"Attempt: {attempts + 1}");
         Console.ResetColor();
 
         try
         {
-            foreach (FileSystemWatcher watcher in watchers)
-            {
-                watcher?.Dispose();
-            }
+            foreach (var watcher in watchers) watcher?.Dispose();
             KillCurrent();
             if (Directory.Exists(tmp_dir))
                 Directory.Delete(tmp_dir, true);
@@ -280,6 +247,7 @@ internal class Program
             Exit(attempts + 1);
             return;
         }
+
         Console.WriteLine("DONE!");
     }
 
@@ -305,6 +273,7 @@ internal class Program
             current_status.Remove("Exporting Stats...");
             Error(e);
         }
+
         current_status.Remove("Exporting Stats...");
         export_timer.Start();
     }
@@ -318,22 +287,20 @@ internal class Program
             try
             {
                 total_size = 0;
-                foreach (string dir in processing_dirs)
-                {
-                    files.AddRange(FFVideoUtility.GetFiles(dir, true));
-                }
+                foreach (var dir in processing_dirs) files.AddRange(FFVideoUtility.GetFiles(dir, true));
                 needs_reeval = true;
             }
             catch (Exception e)
             {
                 Console.WriteLine(JsonConvert.SerializeObject(e, Formatting.Indented));
                 Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine($"Error while scanning for files... Trying again!");
+                Console.WriteLine("Error while scanning for files... Trying again!");
                 Console.ResetColor();
                 _ = new Program([Environment.CurrentDirectory]);
                 return;
             }
         }
+
         current_status.Remove("Scanning for Files...");
         if (!files.Any())
         {
@@ -359,14 +326,12 @@ internal class Program
                     durations.Add(process.video_duration.TotalSeconds);
                 }
             }
+
             offset = total_files - files.Count;
             AppDomain.CurrentDomain.ProcessExit += (s, e) => Exit();
             Console.CancelKeyPress += (s, e) => Exit();
 
-            if (processed != null && processed.Any() && files.Any())
-            {
-                est_time = (long)processed.Average(i => i.time) * files.Count;
-            }
+            if (processed != null && processed.Any() && files.Any()) est_time = (long)processed.Average(i => i.time) * files.Count;
             current_status.Remove("Parsing Stats...");
             if (needs_reeval)
             {
@@ -391,54 +356,41 @@ internal class Program
         {
             using FileStream fs = new(export_file, FileMode.Open, FileAccess.Read, FileShare.None);
             using StreamReader reader = new(fs);
-            JObject json = JObject.Parse(reader.ReadToEnd());
-            TimeSpan creation_time = json["Time"]?.ToObject<TimeSpan>() ?? TimeSpan.MinValue;
+            var json = JObject.Parse(reader.ReadToEnd());
+            var creation_time = json["Time"]?.ToObject<TimeSpan>() ?? TimeSpan.MinValue;
             TimeSpan current_time = new(start);
-            export_creation = new(current_time.Ticks - creation_time.Ticks);
+            export_creation = new TimeSpan(current_time.Ticks - creation_time.Ticks);
             total_size = json["Size"]?.ToObject<long>() ?? 0;
             needs_reeval = json["ReEvaluate"]?.ToObject<bool>() ?? false;
             saved_bytes = json["Saved_Bytes"]?.ToObject<long>() ?? 0;
-            processed = json["processed"]?.ToObject<List<ProcessedFile>>() ?? new();
+            processed = json["processed"]?.ToObject<List<ProcessedFile>>() ?? new List<ProcessedFile>();
             if (export_creation.TotalDays < 5)
-            {
                 return json["files"]?.ToObject<string[]>() ?? Array.Empty<string>();
-            }
-            else
-            {
-                export_creation = new(start);
-            }
+            export_creation = new TimeSpan(start);
         }
-        export_creation = new(start);
+
+        export_creation = new TimeSpan(start);
         current_status.Remove("Importing Stats...");
         return Array.Empty<string>();
     }
 
     private async Task InitializeShortcuts()
     {
-        ConsoleKeyInfo info = Console.ReadKey(true);
+        var info = Console.ReadKey(true);
         if (info.Modifiers.HasFlag(ConsoleModifiers.Control) && info.Key == ConsoleKey.P)
-        {
             Pause();
-        }
         else if (info.Modifiers.HasFlag(ConsoleModifiers.Control) && info.Key == ConsoleKey.S)
-        {
             OpenSaveFile();
-        }
         else if (info.Modifiers.HasFlag(ConsoleModifiers.Control) && info.Key == ConsoleKey.O)
-        {
             OpenWorkspaceDirectory();
-        }
-        else if (info.Modifiers.HasFlag(ConsoleModifiers.Control) && info.Key == ConsoleKey.I)
-        {
-            needs_reeval = true;
-        }
+        else if (info.Modifiers.HasFlag(ConsoleModifiers.Control) && info.Key == ConsoleKey.I) needs_reeval = true;
         if (!stopping || !paused)
             await InitializeShortcuts();
     }
 
     private void KillCurrent()
     {
-        foreach (Process p in active_processes)
+        foreach (var p in active_processes)
         {
             p?.Kill();
             p?.Close();
@@ -469,11 +421,11 @@ internal class Program
     {
         Process p = new()
         {
-            StartInfo = new()
+            StartInfo = new ProcessStartInfo
             {
                 FileName = settings_file,
                 UseShellExecute = true,
-                CreateNoWindow = false,
+                CreateNoWindow = false
             }
         };
 
@@ -484,11 +436,11 @@ internal class Program
     {
         Process p = new()
         {
-            StartInfo = new()
+            StartInfo = new ProcessStartInfo
             {
                 FileName = workspace_dir,
                 UseShellExecute = true,
-                CreateNoWindow = false,
+                CreateNoWindow = false
             }
         };
 
@@ -499,281 +451,254 @@ internal class Program
     {
         paused = !paused;
         if (paused)
-        {
             current_status.Add("Safe Exit is initiated. The current process will finish and then the program will exit!");
-        }
         else
-        {
             current_status.Remove("Safe Exit is initiated. The current process will finish and then the program will exit!");
-        }
     }
 
-    private Task ProcessFile(string file) => Task.Run(() =>
+    private Task ProcessFile(string file)
     {
-        try
+        return Task.Run(() =>
         {
-            current_index++;
-            Process process = null;
-            active_processes.Add(process);
-            List<double> recorded_speeds = new();
-            long st = DateTime.Now.Ticks;
-
-            FileInfo fileInfo = new(file);
-
-            string og_file = file;
-            output.Add(og_file, "");
-            //file = Copy(file, Path.Combine(tmp_dir, $"og_{fileInfo.Name}"));
-
-            FFMediaInfo info = new(file);
-            FFMuxedConverter converter = FFMuxedConverter.SetMedia(info);
-            converter.ChangeHardwareAccelerationMethod();
-            if (!string.IsNullOrWhiteSpace(video_codec))
-                converter.ChangeVideoCodec(video_codec);
-
-            if (!string.IsNullOrWhiteSpace(audio_codec))
-                converter.ChangeAudioCodec(audio_codec);
-
-            if (!string.IsNullOrWhiteSpace(video_bitrate))
-                converter.ChangeVideoBitrate(video_bitrate);
-
-            if (!string.IsNullOrWhiteSpace(audio_bitrate))
-                converter.ChangeAudioBitrate(audio_bitrate);
-
-            if (!string.IsNullOrWhiteSpace(pixel_format))
-                converter.ChangePixelFormat(pixel_format);
-
-            converter.OverwriteOriginal();
-            converter.AddCustomPostInputOption("-map 0");
-            converter.AddCustomPostInputOption("-c:s copy");
-
-            string tmp = Path.Combine(tmp_dir, $"{info.Filename}_tmp{fileInfo.Extension}");
-            StringBuilder ffoutput = new();
-            bool killed = false;
-            process = converter.Convert(tmp, (s, e) =>
+            try
             {
-                string? content = e.Data;
-                if (!string.IsNullOrWhiteSpace(content))
+                current_index++;
+                Process process = null;
+                active_processes.Add(process);
+                List<double> recorded_speeds = new();
+                var st = DateTime.Now.Ticks;
+
+                FileInfo fileInfo = new(file);
+
+                var og_file = file;
+                output.Add(og_file, "");
+                //file = Copy(file, Path.Combine(tmp_dir, $"og_{fileInfo.Name}"));
+
+                FFMediaInfo info = new(file);
+                var converter = FFMuxedConverter.SetMedia(info);
+                converter.ChangeHardwareAccelerationMethod();
+                if (!string.IsNullOrWhiteSpace(video_codec))
+                    converter.ChangeVideoCodec(video_codec);
+
+                if (!string.IsNullOrWhiteSpace(audio_codec))
+                    converter.ChangeAudioCodec(audio_codec);
+
+                if (!string.IsNullOrWhiteSpace(video_bitrate))
+                    converter.ChangeVideoBitrate(video_bitrate);
+
+                if (!string.IsNullOrWhiteSpace(audio_bitrate))
+                    converter.ChangeAudioBitrate(audio_bitrate);
+
+                if (!string.IsNullOrWhiteSpace(pixel_format))
+                    converter.ChangePixelFormat(pixel_format);
+
+                converter.OverwriteOriginal();
+                converter.AddCustomPreInputOption("-hide_banner");
+                converter.AddCustomPostInputOption("-map 0");
+                converter.AddCustomPostInputOption("-c:s copy");
+                converter.AddCustomPostInputOption("-ac 2");
+
+                var tmp = Path.Combine(tmp_dir, $"{info.Filename}_tmp{fileInfo.Extension}");
+                StringBuilder ffoutput = new();
+                var killed = false;
+                process = converter.Convert(tmp, (s, e) =>
                 {
-                    ffoutput.AppendLine(content);
-                }
-                if (File.Exists(tmp) && !killed)
-                {
-                    FileInfo newFile = new(tmp);
-                    if ((ulong)newFile.Length >= info.Size)
+                    var content = e.Data;
+                    if (!string.IsNullOrWhiteSpace(content)) ffoutput.AppendLine(content);
+                    if (File.Exists(tmp) && !killed)
                     {
-                        killed = true;
-                        process.Kill();
-                        string msg = $"Converted name is larger: {info.Filename}";
-                        error_files.Add(msg);
-                        Timer et = new(1000 * 20)
+                        FileInfo newFile = new(tmp);
+                        if ((ulong)newFile.Length >= info.Size)
                         {
-                            AutoReset = false,
-                            Enabled = true
-                        };
-                        et.Elapsed += (s, e) =>
-                        {
-                            error_files.Remove(msg);
-                            try
+                            killed = true;
+                            process.Kill();
+                            var msg = $"Converted name is larger: {info.Filename}";
+                            error_files.Add(msg);
+                            Timer et = new(1000 * 20)
                             {
-                                File.Delete(tmp);
-                            }
-                            catch
+                                AutoReset = false,
+                                Enabled = true
+                            };
+                            et.Elapsed += (s, e) =>
                             {
-                            }
-                        };
-                        long time_to_complete = DateTime.Now.Ticks - st;
-                        process_times.Add(time_to_complete);
-                        processed.Add(new()
-                        {
-                            file = file,
-                            time = time_to_complete,
-                            original_size = (long)info.Size,
-                            new_size = (long)info.Size,
-                            video_duration = info.Duration,
-                            average_speed = recorded_speeds.Average(),
-                            successful = false
-                        });
-                        Save();
-                        et.Start();
-                    }
-                }
-            }, (s, e) =>
-            {
-                try
-                {
-                    if (!id.ContainsKey(file))
-                    {
-                        current_offset++;
-                        id.Add(file, current_offset);
-                    }
-
-                    StringBuilder o = new();
-                    if (double.IsInfinity(e.Percentage))
-                    {
-                        Console.WriteLine();
-                    }
-                    string name = info.Filename;
-                    int length = (int)(Console.WindowWidth * .2);
-                    if (name.Length > length + 4)
-                    {
-                        name = $"{new string(info.Filename.Take(length / 2).ToArray()).Trim()}...{new string(info.Filename.TakeLast(length / 2).ToArray()).Trim()}";
-                    }
-                    string bf = $"[{name} ({id[file] + offset}/{(total_files)})] {e.Percentage:p2} | ";
-                    string pf = $" | {e.Speed:n2}x Speed | {CLFileMath.AdjustedFileSize(new FileInfo(tmp).Length)} / {CLFileMath.AdjustedFileSize(info.Size)}";
-                    int content_size = bf.Length + pf.Length;
-                    o.Append(bf);
-                    double size = Console.WindowWidth - content_size - 10;
-                    for (int i = 0; i < size; i++)
-                    {
-                        if (e.Percentage * 100 >= i * (100 / size))
-                        {
-                            o.Append('=');
-                        }
-                        else
-                        {
-                            o.Append(' ');
-                        }
-                    }
-                    recorded_speeds.Add(e.Speed);
-                    speeds.Add(e.Speed);
-                    o.Append(pf);
-                    if (!output.ContainsKey(og_file))
-                    {
-                        output.Add(og_file, o.ToString());
-                    }
-                    else
-                    {
-                        output[og_file] = o.ToString();
-                    }
-                }
-                catch
-                {
-                    Console.WriteLine();
-                }
-            }, false);
-
-            process.Start();
-            process.BeginErrorReadLine();
-            process.BeginOutputReadLine();
-            process.WaitForExit();
-
-            if (process != null && process.HasExited)
-                active_processes.Remove(process);
-
-            if (output.Any() && output.ContainsKey(og_file))
-                output.Remove(og_file);
-            if (id.Any() && id.ContainsKey(file))
-                id.Remove(file);
-
-            if (!killed && !stopping)
-            {
-                if (process.ExitCode == 0)
-                {
-                    long new_size = new FileInfo(tmp).Length;
-                    if (new_size < fileInfo.Length)
-                    {
-                        long file_saved = fileInfo.Length - new_size;
-                        saved_bytes += file_saved;
-                        if (overwrite)
-                        {
-                            try
-                            {
-                                Task? move_task = null;
-                                move_task = new Task(() =>
-                                {
-                                    try
-                                    {
-                                        moving_files.Add(og_file);
-                                        File.Move(tmp, og_file, true);
-                                        moving_files.Remove(og_file);
-                                    }
-                                    catch
-                                    {
-                                        moving_files.Remove(file);
-                                        Thread.Sleep(1000 * 5);
-                                        move_task?.Start();
-                                    }
-                                });
+                                error_files.Remove(msg);
                                 try
                                 {
-                                    move_task.Start();
-                                    if (paused || stopping || current_index >= files.Count)
-                                        move_task.Wait();
+                                    File.Delete(tmp);
                                 }
                                 catch
                                 {
                                 }
-                            }
-                            catch (Exception e)
+                            };
+                            var time_to_complete = DateTime.Now.Ticks - st;
+                            process_times.Add(time_to_complete);
+                            processed.Add(new ProcessedFile
                             {
-                                Error(e);
-                            }
+                                file = file,
+                                time = time_to_complete,
+                                original_size = (long)info.Size,
+                                new_size = (long)info.Size,
+                                video_duration = info.Duration,
+                                average_speed = recorded_speeds.Average(),
+                                successful = false
+                            });
+                            Save();
+                            et.Start();
                         }
                     }
-                    processed.Add(new()
-                    {
-                        file = file,
-                        time = DateTime.Now.Ticks - st,
-                        original_size = (long)info.Size,
-                        new_size = new_size,
-                        video_duration = info.Duration,
-                        average_speed = recorded_speeds.Average(),
-                        successful = true
-                    });
-                    est_time = (long)processed.Average(i => i.time) * files.Count;
-                    reductions.Add(new_size / fileInfo.Length);
-                    Save();
-
-                    if (File.Exists(file))
-                        File.Delete(file);
-                    if (File.Exists(tmp))
-                        File.Delete(tmp);
-                }
-                else
+                }, (s, e) =>
                 {
-                    error_files.Add(file);
-                    Timer error_timeout = new(5000)
+                    try
                     {
-                        AutoReset = false,
-                        Enabled = true
-                    };
-                    error_timeout.Elapsed += (s, e) =>
-                    {
-                        error_files.Remove(file);
-                    };
-                    error_timeout.Start();
+                        if (!id.ContainsKey(file))
+                        {
+                            current_offset++;
+                            id.Add(file, current_offset);
+                        }
 
-                    Error(JsonConvert.SerializeObject(new
+                        StringBuilder o = new();
+                        if (double.IsInfinity(e.Percentage)) Console.WriteLine();
+                        var name = info.Filename;
+                        var length = (int)(Console.WindowWidth * .2);
+                        if (name.Length > length + 4) name = $"{new string(info.Filename.Take(length / 2).ToArray()).Trim()}...{new string(info.Filename.TakeLast(length / 2).ToArray()).Trim()}";
+                        var bf = $"[{name} ({id[file] + offset}/{total_files})] {e.Percentage:p2} | ";
+                        var pf = $" | {e.Speed:n2}x Speed | {CLFileMath.AdjustedFileSize(new FileInfo(tmp).Length)} / {CLFileMath.AdjustedFileSize(info.Size)}";
+                        var content_size = bf.Length + pf.Length;
+                        o.Append(bf);
+                        double size = Console.WindowWidth - content_size - 10;
+                        for (var i = 0; i < size; i++)
+                            if (e.Percentage * 100 >= i * (100 / size))
+                                o.Append('=');
+                            else
+                                o.Append(' ');
+                        recorded_speeds.Add(e.Speed);
+                        speeds.Add(e.Speed);
+                        o.Append(pf);
+                        if (!output.ContainsKey(og_file))
+                            output.Add(og_file, o.ToString());
+                        else
+                            output[og_file] = o.ToString();
+                    }
+                    catch
                     {
-                        exit_code = process.ExitCode,
-                        cmd = process.StartInfo.Arguments,
-                        ffoutput = ffoutput.ToString()
-                    }, Formatting.Indented), info.Filename);
+                        Console.WriteLine();
+                    }
+                }, false);
 
-                    File.Delete(tmp);
+                process.Start();
+                process.BeginErrorReadLine();
+                process.BeginOutputReadLine();
+                process.WaitForExit();
+
+                if (process != null && process.HasExited)
+                    active_processes.Remove(process);
+
+                if (output.Any() && output.ContainsKey(og_file))
+                    output.Remove(og_file);
+                if (id.Any() && id.ContainsKey(file))
+                    id.Remove(file);
+
+                if (!killed && !stopping)
+                {
+                    if (process.ExitCode == 0)
+                    {
+                        var new_size = new FileInfo(tmp).Length;
+                        if (new_size < fileInfo.Length)
+                        {
+                            var file_saved = fileInfo.Length - new_size;
+                            saved_bytes += file_saved;
+                            if (overwrite)
+                                try
+                                {
+                                    Task? move_task = null;
+                                    move_task = new Task(() =>
+                                    {
+                                        try
+                                        {
+                                            moving_files.Add(og_file);
+                                            File.Move(tmp, og_file, true);
+                                            moving_files.Remove(og_file);
+                                        }
+                                        catch
+                                        {
+                                            moving_files.Remove(file);
+                                            Thread.Sleep(1000 * 5);
+                                            move_task?.Start();
+                                        }
+                                    });
+                                    try
+                                    {
+                                        move_task.Start();
+                                        if (paused || stopping || current_index >= files.Count)
+                                            move_task.Wait();
+                                    }
+                                    catch
+                                    {
+                                    }
+                                }
+                                catch (Exception e)
+                                {
+                                    Error(e);
+                                }
+                        }
+
+                        processed.Add(new ProcessedFile
+                        {
+                            file = file,
+                            time = DateTime.Now.Ticks - st,
+                            original_size = (long)info.Size,
+                            new_size = new_size,
+                            video_duration = info.Duration,
+                            average_speed = recorded_speeds.Average(),
+                            successful = true
+                        });
+                        est_time = (long)processed.Average(i => i.time) * files.Count;
+                        reductions.Add(new_size / fileInfo.Length);
+                        Save();
+
+                        if (File.Exists(file))
+                            File.Delete(file);
+                        if (File.Exists(tmp))
+                            File.Delete(tmp);
+                    }
+                    else
+                    {
+                        error_files.Add(file);
+                        Timer error_timeout = new(5000)
+                        {
+                            AutoReset = false,
+                            Enabled = true
+                        };
+                        error_timeout.Elapsed += (s, e) => { error_files.Remove(file); };
+                        error_timeout.Start();
+
+                        Error(JsonConvert.SerializeObject(new
+                        {
+                            exit_code = process.ExitCode,
+                            cmd = process.StartInfo.Arguments,
+                            ffoutput = ffoutput.ToString()
+                        }, Formatting.Indented), info.Filename);
+
+                        File.Delete(tmp);
+                    }
                 }
+
+                process?.Close();
             }
-            process?.Close();
-        }
-        catch (Exception e)
+            catch (Exception e)
+            {
+                Error(e);
+            }
+        }).ContinueWith(a =>
         {
-            Error(e);
-        }
-    }).ContinueWith(a =>
-    {
-        if (!paused && !stopping && current_index < files.Count)
-        {
-            ProcessFile(files[current_index + 1]).Wait();
-        }
-    });
+            if (!paused && !stopping && current_index < files.Count) ProcessFile(files[current_index + 1]).Wait();
+        });
+    }
 
     private void ProcessQueue()
     {
-        Task[] pro = new Task[concurrent];
-        for (int i = 0; i < concurrent; i++)
-        {
-            pro[i] = ProcessFile(files[i]);
-        }
+        var pro = new Task[concurrent];
+        for (var i = 0; i < concurrent; i++) pro[i] = ProcessFile(files[i]);
         export_timer.Elapsed += (s, e) => Export();
         Export();
         Task.WaitAll(pro);
@@ -791,7 +716,7 @@ internal class Program
             video_bitrate,
             audio_bitrate,
             pixel_format,
-            overwrite,
+            overwrite
         }, Formatting.Indented));
     }
 
@@ -803,20 +728,18 @@ internal class Program
             Console.CursorTop = 0;
             Console.CursorLeft = 0;
             Console.ForegroundColor = ConsoleColor.Green;
-            int path_length = 20;
+            var path_length = 20;
             Console.WriteLine("PROCESSING: ");
-            foreach (string dir in processing_dirs)
+            foreach (var dir in processing_dirs)
             {
                 Console.ForegroundColor = ConsoleColor.Cyan;
-                string dir_name = new DirectoryInfo(dir).Name;
+                var dir_name = new DirectoryInfo(dir).Name;
                 Console.WriteLine("- " + (dir.Length >= path_length + dir_name.Length + 4 ? new string(dir.Take(path_length).ToArray()) + @"...\" + dir_name + @"\" : dir));
             }
+
             StringBuilder builder = new();
 
-            foreach (var o in output)
-            {
-                builder.AppendLine(o.Value.StartsWith("[og_") ? "[" + o.Value[4..] : o.Value);
-            }
+            foreach (var o in output) builder.AppendLine(o.Value.StartsWith("[og_") ? "[" + o.Value[4..] : o.Value);
 
             Console.CursorTop = processing_dirs.Length + 2;
             Console.CursorLeft = 0;
@@ -826,32 +749,24 @@ internal class Program
             Console.CursorLeft = 0;
 
             Console.ForegroundColor = ConsoleColor.Cyan;
-            runtime = new(DateTime.Now.Ticks - start);
+            runtime = new TimeSpan(DateTime.Now.Ticks - start);
             Console.WriteLine($"Runtime: {GetTime(runtime)}\n");
 
             Console.ForegroundColor = ConsoleColor.DarkYellow;
             Console.Write("Needs Refresh: ");
             if (needs_reeval)
-            {
                 Console.ForegroundColor = ConsoleColor.Green;
-            }
             else
-            {
                 Console.ForegroundColor = ConsoleColor.Red;
-            }
             Console.WriteLine(needs_reeval);
 
             Console.ForegroundColor = ConsoleColor.DarkYellow;
             Console.Write("Overwrite: ");
 
             if (overwrite)
-            {
                 Console.ForegroundColor = ConsoleColor.Green;
-            }
             else
-            {
                 Console.ForegroundColor = ConsoleColor.Red;
-            }
             Console.WriteLine(overwrite);
             Console.WriteLine();
 
@@ -871,49 +786,47 @@ internal class Program
             update_screen_timer.Start();
     }
 
-    private Task Watch() => Task.Run(() =>
+    private Task Watch()
     {
-        watchers = new FileSystemWatcher[processing_dirs.Length];
-        for (int i = 0; i < processing_dirs.Length; i++)
+        return Task.Run(() =>
         {
-            watchers[i] = new()
+            watchers = new FileSystemWatcher[processing_dirs.Length];
+            for (var i = 0; i < processing_dirs.Length; i++)
             {
-                Path = processing_dirs[i],
-                NotifyFilter = NotifyFilters.CreationTime | NotifyFilters.DirectoryName | NotifyFilters.FileName,
-                Filter = "*.*",
-                IncludeSubdirectories = true,
-                EnableRaisingEvents = true,
-            };
-            watchers[i].Created += handler;
-            watchers[i].Deleted += handler;
-        }
-        void handler(object s, FileSystemEventArgs e)
-        {
-            try
-            {
-                if (!processed.Any(i => i.file.Equals(e.FullPath)) && FFVideoUtility.video_extension.Contains(new FileInfo(e.FullPath).Extension.Trim('.')))
+                watchers[i] = new FileSystemWatcher
                 {
-                    if (e.ChangeType == WatcherChangeTypes.Deleted && files.Contains(e.FullPath))
-                    {
-                        files.Remove(e.FullPath);
-                    }
-                    if (e.ChangeType == WatcherChangeTypes.Created && !files.Contains(e.FullPath))
-                    {
-                        files.Add(e.FullPath);
-                    }
+                    Path = processing_dirs[i],
+                    NotifyFilter = NotifyFilters.CreationTime | NotifyFilters.DirectoryName | NotifyFilters.FileName,
+                    Filter = "*.*",
+                    IncludeSubdirectories = true,
+                    EnableRaisingEvents = true
+                };
+                watchers[i].Created += handler;
+                watchers[i].Deleted += handler;
+            }
 
-                    current_status.Add($"Detected filesystem change!\nFile: \"{e.FullPath}\"\nChange Type: {e.ChangeType}");
-                    needs_reeval = true;
-                    Thread.Sleep(1000 * 10);
-                    current_status.Remove($"Detected filesystem change!\nFile: \"{e.FullPath}\"\nChange Type: {e.ChangeType}");
+            void handler(object s, FileSystemEventArgs e)
+            {
+                try
+                {
+                    if (!processed.Any(i => i.file.Equals(e.FullPath)) && FFVideoUtility.video_extension.Contains(new FileInfo(e.FullPath).Extension.Trim('.')))
+                    {
+                        if (e.ChangeType == WatcherChangeTypes.Deleted && files.Contains(e.FullPath)) files.Remove(e.FullPath);
+                        if (e.ChangeType == WatcherChangeTypes.Created && !files.Contains(e.FullPath)) files.Add(e.FullPath);
+
+                        current_status.Add($"Detected filesystem change!\nFile: \"{e.FullPath}\"\nChange Type: {e.ChangeType}");
+                        needs_reeval = true;
+                        Thread.Sleep(1000 * 10);
+                        current_status.Remove($"Detected filesystem change!\nFile: \"{e.FullPath}\"\nChange Type: {e.ChangeType}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Error(ex);
                 }
             }
-            catch (Exception ex)
-            {
-                Error(ex);
-            }
-        }
-    });
+        });
+    }
 
     private void WriteEstamates()
     {
@@ -922,10 +835,10 @@ internal class Program
             if (processed.Count > 2 && durations.Count > 2 && speeds.Count > 2 && est_time != 0)
             {
                 StringBuilder estBuilder = new();
-                estBuilder.AppendLine($"Estamates:");
+                estBuilder.AppendLine("Estamates:");
 
-                double duration_seconds = (durations.Average() / speeds.Average() * total_files) - runtime.TotalSeconds;
-                double size_seconds = new TimeSpan(est_time - runtime.Ticks).TotalSeconds;
+                var duration_seconds = durations.Average() / speeds.Average() * total_files - runtime.TotalSeconds;
+                var size_seconds = new TimeSpan(est_time - runtime.Ticks).TotalSeconds;
 
                 estBuilder.AppendLine($"\t-EST Time:           {GetTime(TimeSpan.FromSeconds((duration_seconds + size_seconds) / 2))}");
                 estBuilder.AppendLine($"\t-EST Savings:        {CLFileMath.AdjustedFileSize(reductions.Average() * total_size)}");
@@ -935,7 +848,10 @@ internal class Program
                 Console.ResetColor();
             }
         }
-        catch (Exception e) { Error(e); }
+        catch (Exception e)
+        {
+            Error(e);
+        }
     }
 
     private void WriteMessages()
@@ -944,23 +860,18 @@ internal class Program
         {
             Console.ForegroundColor = ConsoleColor.Blue;
 
-            foreach (string item in current_status)
-            {
-                Console.WriteLine(item);
-            }
+            foreach (var item in current_status) Console.WriteLine(item);
 
-            foreach (string file in moving_files)
-            {
-                Console.WriteLine($"Overwriting {new FileInfo(file).Name}!");
-            }
+            foreach (var file in moving_files) Console.WriteLine($"Overwriting {new FileInfo(file).Name}!");
 
             Console.ForegroundColor = ConsoleColor.Red;
-            foreach (string file in error_files)
-            {
-                Console.WriteLine($"Failed to Process {new FileInfo(file).Name}!");
-            }
+            foreach (var file in error_files) Console.WriteLine($"Failed to Process {new FileInfo(file).Name}!");
         }
-        catch (Exception e) { Error(e); }
+        catch (Exception e)
+        {
+            Error(e);
+        }
+
         Console.ResetColor();
     }
 
@@ -988,8 +899,8 @@ internal class Program
 
             if (processed.Count > 2 && durations.Count > 2 && speeds.Count > 2 && est_time != 0)
             {
-                double duration_seconds = (durations.Average() / speeds.Average() * total_files) - runtime.TotalSeconds;
-                double size_seconds = new TimeSpan(est_time - runtime.Ticks).TotalSeconds;
+                var duration_seconds = durations.Average() / speeds.Average() * total_files - runtime.TotalSeconds;
+                var size_seconds = new TimeSpan(est_time - runtime.Ticks).TotalSeconds;
 
                 statBuilder.AppendLine($"\t-EST Time:           {GetTime(TimeSpan.FromSeconds((duration_seconds + size_seconds) / 2))}");
                 statBuilder.AppendLine($"\t-EST Savings:        {CLFileMath.AdjustedFileSize(total_size / reductions.Average())}");
@@ -999,6 +910,9 @@ internal class Program
             Console.WriteLine(statBuilder);
             Console.ResetColor();
         }
-        catch (Exception e) { Error(e); }
+        catch (Exception e)
+        {
+            Error(e);
+        }
     }
 }
