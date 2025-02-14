@@ -1,4 +1,5 @@
 ﻿// LFInteractive LLC. - All Rights Reserved
+
 namespace BatchProcessFFmpeg.Models;
 
 internal struct ManifestFile
