@@ -92,7 +92,17 @@ internal class Program
                 }
         }
 
-        var exe_dir = Directory.GetParent(Assembly.GetExecutingAssembly()?.Location ?? "")?.FullName ?? "";
+        var exe_path = Assembly.GetExecutingAssembly()?.Location ?? "";
+        if (string.IsNullOrWhiteSpace(exe_path))
+        {
+            Console.ForegroundColor = ConsoleColor.Red;
+            Console.Error.WriteLine("Could not find executable path!");
+            Console.ResetColor();
+            Environment.Exit(1);
+            return;
+        }
+
+        var exe_dir = Directory.GetParent(exe_path)?.FullName ?? "";
 
         start = DateTime.Now.Ticks;
 
@@ -494,7 +504,8 @@ internal class Program
 
                 converter.OverwriteOriginal();
                 converter.AddCustomPreInputOption("-hide_banner");
-                converter.AddCustomPostInputOption("-map 0");
+                converter.AddCustomPostInputOption("-map 0:v:0"); // Map only the first video stream
+                converter.AddCustomPostInputOption("-map 0:a"); // Map all audio streams
                 converter.AddCustomPostInputOption("-c:s copy");
                 converter.AddCustomPostInputOption("-ac 2");
 
@@ -720,72 +731,6 @@ internal class Program
         }, Formatting.Indented));
     }
 
-    private void UpdateScreen()
-    {
-        Console.Clear();
-        try
-        {
-            Console.CursorTop = 0;
-            Console.CursorLeft = 0;
-            Console.ForegroundColor = ConsoleColor.Green;
-            var path_length = 20;
-            Console.WriteLine("PROCESSING: ");
-            foreach (var dir in processing_dirs)
-            {
-                Console.ForegroundColor = ConsoleColor.Cyan;
-                var dir_name = new DirectoryInfo(dir).Name;
-                Console.WriteLine("- " + (dir.Length >= path_length + dir_name.Length + 4 ? new string(dir.Take(path_length).ToArray()) + @"...\" + dir_name + @"\" : dir));
-            }
-
-            StringBuilder builder = new();
-
-            foreach (var o in output) builder.AppendLine(o.Value.StartsWith("[og_") ? "[" + o.Value[4..] : o.Value);
-
-            Console.CursorTop = processing_dirs.Length + 2;
-            Console.CursorLeft = 0;
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine(builder);
-            Console.CursorTop = concurrent + 5;
-            Console.CursorLeft = 0;
-
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            runtime = new TimeSpan(DateTime.Now.Ticks - start);
-            Console.WriteLine($"Runtime: {GetTime(runtime)}\n");
-
-            Console.ForegroundColor = ConsoleColor.DarkYellow;
-            Console.Write("Needs Refresh: ");
-            if (needs_reeval)
-                Console.ForegroundColor = ConsoleColor.Green;
-            else
-                Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine(needs_reeval);
-
-            Console.ForegroundColor = ConsoleColor.DarkYellow;
-            Console.Write("Overwrite: ");
-
-            if (overwrite)
-                Console.ForegroundColor = ConsoleColor.Green;
-            else
-                Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine(overwrite);
-            Console.WriteLine();
-
-            WriteStats();
-            WriteEstamates();
-
-            WriteMessages();
-        }
-        catch (Exception e)
-        {
-            Error(e);
-        }
-
-        Console.ResetColor();
-
-        if (!stopping)
-            update_screen_timer.Start();
-    }
-
     private Task Watch()
     {
         return Task.Run(() =>
@@ -828,56 +773,109 @@ internal class Program
         });
     }
 
-    private void WriteEstamates()
+    private void UpdateScreen()
     {
+        // Build all strings first before any console operations
+        var screenBuilder = new StringBuilder();
+        var currentColor = Console.ForegroundColor;
         try
         {
-            if (processed.Count > 2 && durations.Count > 2 && speeds.Count > 2 && est_time != 0)
+            // Processing section
+            screenBuilder.AppendLine("PROCESSING: ");
+            var path_length = 20;
+            foreach (var dir in processing_dirs)
             {
-                StringBuilder estBuilder = new();
-                estBuilder.AppendLine("Estamates:");
-
-                var duration_seconds = durations.Average() / speeds.Average() * total_files - runtime.TotalSeconds;
-                var size_seconds = new TimeSpan(est_time - runtime.Ticks).TotalSeconds;
-
-                estBuilder.AppendLine($"\t-EST Time:           {GetTime(TimeSpan.FromSeconds((duration_seconds + size_seconds) / 2))}");
-                estBuilder.AppendLine($"\t-EST Savings:        {CLFileMath.AdjustedFileSize(reductions.Average() * total_size)}");
-                estBuilder.AppendLine();
-
-                Console.ForegroundColor = ConsoleColor.DarkCyan;
-                Console.ResetColor();
+                var dir_name = new DirectoryInfo(dir).Name;
+                screenBuilder.AppendLine("- " + (dir.Length >= path_length + dir_name.Length + 4
+                    ? new string(dir.Take(path_length).ToArray()) + @"...\" + dir_name + @"\"
+                    : dir));
             }
-        }
-        catch (Exception e)
-        {
-            Error(e);
-        }
-    }
 
-    private void WriteMessages()
-    {
-        try
-        {
+            // Output section
+            foreach (var o in output)
+            {
+                screenBuilder.AppendLine(o.Value.StartsWith("[og_") ? "[" + o.Value[4..] : o.Value);
+            }
+
+            // Runtime section
+            runtime = new TimeSpan(DateTime.Now.Ticks - start);
+            screenBuilder.AppendLine($"Runtime: {GetTime(runtime)}\n");
+
+            // Status flags section
+            screenBuilder.Append("Needs Refresh: ");
+            screenBuilder.AppendLine(needs_reeval.ToString());
+
+            screenBuilder.Append("Overwrite: ");
+            screenBuilder.AppendLine(overwrite.ToString());
+            screenBuilder.AppendLine();
+
+            // Get stats, estimates and messages content
+            var statsContent = GetStatsContent();
+            var estimatesContent = GetEstimatesContent();
+            var messagesContent = GetMessagesContent();
+
+            // Now clear and write everything at once
+            Console.Clear();
+            Console.CursorTop = 0;
+            Console.CursorLeft = 0;
+
+            // Write processing section
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine("PROCESSING: ");
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            var lines = screenBuilder.ToString().Split(Environment.NewLine);
+            foreach (var line in lines.Skip(1).Take(processing_dirs.Length))
+            {
+                Console.WriteLine(line);
+            }
+
+            // Write output section
+            Console.CursorTop = processing_dirs.Length + 2;
+            Console.CursorLeft = 0;
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            foreach (var line in lines.Skip(processing_dirs.Length + 1).Take(output.Count))
+            {
+                Console.WriteLine(line);
+            }
+
+            // Write runtime
+            Console.CursorTop = concurrent + 5;
+            Console.CursorLeft = 0;
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.WriteLine($"Runtime: {GetTime(runtime)}\n");
+
+            // Write status flags
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.Write("Needs Refresh: ");
+            Console.ForegroundColor = needs_reeval ? ConsoleColor.Green : ConsoleColor.Red;
+            Console.WriteLine(needs_reeval);
+
+            Console.ForegroundColor = ConsoleColor.DarkYellow;
+            Console.Write("Overwrite: ");
+            Console.ForegroundColor = overwrite ? ConsoleColor.Green : ConsoleColor.Red;
+            Console.WriteLine(overwrite);
+            Console.WriteLine();
+
+            // Write cached content
+            Console.ForegroundColor = ConsoleColor.DarkCyan;
+            Console.Write(statsContent);
+            Console.Write(estimatesContent);
             Console.ForegroundColor = ConsoleColor.Blue;
-
-            foreach (var item in current_status) Console.WriteLine(item);
-
-            foreach (var file in moving_files) Console.WriteLine($"Overwriting {new FileInfo(file).Name}!");
-
-            Console.ForegroundColor = ConsoleColor.Red;
-            foreach (var file in error_files) Console.WriteLine($"Failed to Process {new FileInfo(file).Name}!");
+            Console.Write(messagesContent);
         }
         catch (Exception e)
         {
             Error(e);
         }
 
-        Console.ResetColor();
+        Console.ForegroundColor = currentColor;
+        if (!stopping)
+            update_screen_timer.Start();
     }
 
-    private void WriteStats()
+    private string GetStatsContent()
     {
-        StringBuilder statBuilder = new();
+        var statBuilder = new StringBuilder();
         try
         {
             statBuilder.AppendLine("Statistics:");
@@ -896,23 +894,57 @@ internal class Program
                 statBuilder.AppendLine($"\t-Average Time:       {GetTime(TimeSpan.FromTicks((long)process_times.Average()))}!");
 
             statBuilder.AppendLine();
-
-            if (processed.Count > 2 && durations.Count > 2 && speeds.Count > 2 && est_time != 0)
-            {
-                var duration_seconds = durations.Average() / speeds.Average() * total_files - runtime.TotalSeconds;
-                var size_seconds = new TimeSpan(est_time - runtime.Ticks).TotalSeconds;
-
-                statBuilder.AppendLine($"\t-EST Time:           {GetTime(TimeSpan.FromSeconds((duration_seconds + size_seconds) / 2))}");
-                statBuilder.AppendLine($"\t-EST Savings:        {CLFileMath.AdjustedFileSize(total_size / reductions.Average())}");
-            }
-
-            Console.ForegroundColor = ConsoleColor.DarkCyan;
-            Console.WriteLine(statBuilder);
-            Console.ResetColor();
         }
         catch (Exception e)
         {
             Error(e);
         }
+
+        return statBuilder.ToString();
+    }
+
+    private string GetEstimatesContent()
+    {
+        var estBuilder = new StringBuilder();
+        try
+        {
+            if (processed.Count > 2 && durations.Count > 2 && speeds.Count > 2 && est_time != 0)
+            {
+                estBuilder.AppendLine("Estimates:");
+                var duration_seconds = durations.Average() / speeds.Average() * total_files - runtime.TotalSeconds;
+                var size_seconds = new TimeSpan(est_time - runtime.Ticks).TotalSeconds;
+                estBuilder.AppendLine($"\t-EST Time:           {GetTime(TimeSpan.FromSeconds((duration_seconds + size_seconds) / 2))}");
+                estBuilder.AppendLine($"\t-EST Savings:        {CLFileMath.AdjustedFileSize(reductions.Average() * total_size)}");
+                estBuilder.AppendLine();
+            }
+        }
+        catch (Exception e)
+        {
+            Error(e);
+        }
+
+        return estBuilder.ToString();
+    }
+
+    private string GetMessagesContent()
+    {
+        var messageBuilder = new StringBuilder();
+        try
+        {
+            foreach (var item in current_status)
+                messageBuilder.AppendLine(item);
+
+            foreach (var file in moving_files)
+                messageBuilder.AppendLine($"Overwriting {new FileInfo(file).Name}!");
+
+            foreach (var file in error_files)
+                messageBuilder.AppendLine($"Failed to Process {new FileInfo(file).Name}!");
+        }
+        catch (Exception e)
+        {
+            Error(e);
+        }
+
+        return messageBuilder.ToString();
     }
 }
